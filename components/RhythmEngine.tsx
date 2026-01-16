@@ -10,10 +10,6 @@ const LOOKAHEAD = 25.0; // ms
 const SCHEDULE_AHEAD_TIME = 0.1; // seconds
 const GAME_DURATION = 30.0; // seconds
 
-// 808 Tuning
-const LOW_TOM_FREQ = 130;
-const HIGH_TOM_FREQ = 154.5; // Minor 3rd up from 130Hz
-
 // Scoring Windows (ms) for [Perfect+, Perfect, Great, Good]
 const SCORING_WINDOWS = {
   [Difficulty.EASY]:   [40, 70, 130, 200],
@@ -45,7 +41,7 @@ const RhythmEngine: React.FC = () => {
 
   // Audio & Timing Refs
   const audioContext = useRef<AudioContext | null>(null);
-  const noiseBuffer = useRef<AudioBuffer | null>(null); 
+  const noiseBuffer = useRef<AudioBuffer | null>(null);
   
   const nextNoteTime = useRef<number>(0.0); 
   const nextMetronomeTime = useRef<number>(0.0); 
@@ -70,8 +66,9 @@ const RhythmEngine: React.FC = () => {
       await audioContext.current.resume();
     }
 
+    // Create Noise Buffer for Snare Synthesis
     if (!noiseBuffer.current) {
-      const bufferSize = audioContext.current.sampleRate * 2.0; 
+      const bufferSize = audioContext.current.sampleRate * 2.0; // 2 seconds
       const buffer = audioContext.current.createBuffer(1, bufferSize, audioContext.current.sampleRate);
       const data = buffer.getChannelData(0);
       for (let i = 0; i < bufferSize; i++) {
@@ -101,50 +98,75 @@ const RhythmEngine: React.FC = () => {
     osc.stop(time + 0.2);
   }, []);
 
-  const play808Tom = useCallback((hand: Hand, time: number) => {
+  const playClave = useCallback((hand: Hand, time: number) => {
       if (!audioContext.current) return;
       const ctx = audioContext.current;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
 
-      // Tuning: Minor 3rd apart
-      const freq = (hand === 'left') ? LOW_TOM_FREQ : HIGH_TOM_FREQ;
+      // Tuning: Perfect Fourth
+      // Left (Low): 1800Hz
+      // Right (High): 2400Hz (1800 * 4/3)
+      const freq = (hand === 'left') ? 1800 : 2400;
 
       osc.type = 'sine';
       osc.frequency.setValueAtTime(freq, time);
-      // Pitch envelope for "thud"
-      osc.frequency.exponentialRampToValueAtTime(freq * 0.5, time + 0.15);
-
-      gain.gain.setValueAtTime(0.7, time);
-      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.3);
+      
+      // Sharp attack, short decay
+      gain.gain.setValueAtTime(0, time);
+      gain.gain.linearRampToValueAtTime(0.6, time + 0.005);
+      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
 
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(time);
-      osc.stop(time + 0.3);
+      osc.stop(time + 0.15);
   }, []);
 
-  const playHiHat = useCallback((time: number) => {
+  // Snare Drum Synthesis (Replaces Tom)
+  const playGuideSnare = useCallback((hand: Hand, time: number) => {
     if (!audioContext.current || !noiseBuffer.current) return;
     const ctx = audioContext.current;
 
-    const source = ctx.createBufferSource();
-    source.buffer = noiseBuffer.current;
+    // Snare Settings
+    // Right = High Snare (Tighter), Left/Any = Low Snare (Looser)
+    const isHigh = (hand === 'right');
+    const fundFreq = isHigh ? 250 : 180;
+    const noiseFilterFreq = isHigh ? 2000 : 1000;
+
+    // 1. Tone (Shell Resonance)
+    const osc = ctx.createOscillator();
+    const oscGain = ctx.createGain();
     
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'highpass';
-    filter.frequency.value = 7000;
+    osc.frequency.setValueAtTime(fundFreq, time);
+    osc.frequency.exponentialRampToValueAtTime(fundFreq * 0.5, time + 0.1);
+    
+    oscGain.gain.setValueAtTime(0.2, time);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, time + 0.15);
+    
+    osc.connect(oscGain);
+    oscGain.connect(ctx.destination);
+    osc.start(time);
+    osc.stop(time + 0.2);
 
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.05, time); // Very Quiet helper hat
-    gain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
-
-    source.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
-
-    source.start(time);
-    source.stop(time + 0.1);
+    // 2. Noise (Snares)
+    const noise = ctx.createBufferSource();
+    noise.buffer = noiseBuffer.current;
+    
+    const noiseFilter = ctx.createBiquadFilter();
+    noiseFilter.type = 'highpass';
+    noiseFilter.frequency.value = noiseFilterFreq;
+    
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.15, time);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
+    
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(ctx.destination);
+    
+    noise.start(time);
+    noise.stop(time + 0.2);
   }, []);
 
   const scheduleNote = useCallback((note: NoteEvent, time: number) => {
@@ -153,9 +175,9 @@ const RhythmEngine: React.FC = () => {
     const now = audioContext.current?.currentTime || 0;
     expectedHits.current = expectedHits.current.filter(hit => hit.time > now - 0.5);
     
-    // Play guide sound (optional, maybe just HiHat for timing)
-    playHiHat(time);
-  }, [playHiHat]);
+    // Play guide sound (Snare)
+    playGuideSnare(note.hand, time);
+  }, [playGuideSnare]);
 
   const endGame = useCallback(() => {
     if (!gameConfig) return;
@@ -266,7 +288,10 @@ const RhythmEngine: React.FC = () => {
         setTimeLeft(GAME_DURATION); 
         // Calculate beats remaining in countdown
         const beatsRemaining = Math.ceil(Math.abs(elapsedTime) / beatDuration);
-        setCountDown(beatsRemaining <= 4 ? beatsRemaining : null);
+        
+        // Show countdown only for the final bar of count-in
+        const beatsPerBar = gameConfig.level.loopBeats;
+        setCountDown(beatsRemaining <= beatsPerBar ? beatsRemaining : null);
     } else {
         setIsCountIn(false);
         setCountDown(null);
@@ -351,7 +376,9 @@ const RhythmEngine: React.FC = () => {
       if (audioContext.current) {
           const now = audioContext.current.currentTime;
           const beatDuration = 60 / config.bpm;
-          const countInDuration = beatDuration * 8; 
+          
+          // Two full measures of count-in
+          const countInDuration = beatDuration * config.level.loopBeats * 2; 
           
           const audioStartTime = now + 0.1;
           
@@ -390,7 +417,7 @@ const RhythmEngine: React.FC = () => {
     
     // Play feedback sound immediately
     if (audioContext.current.state === 'running') {
-        play808Tom(inputHand, audioContext.current.currentTime);
+        playClave(inputHand, audioContext.current.currentTime);
     }
 
     const tapTime = audioContext.current.currentTime;
@@ -413,25 +440,15 @@ const RhythmEngine: React.FC = () => {
 
     if (candidates.length > 0) {
         // Prioritize hits that match the hand
-        // If user hits LEFT, and we have a LEFT note nearby, prefer it over a slightly closer RIGHT note.
-        // Sort candidates by priority: 
-        // 1. Matches Hand? (Primary sort key)
-        // 2. Absolute time difference (Secondary sort key)
-        
         candidates.sort((a, b) => {
             const aMatch = (a.hand === inputHand || a.hand === 'any');
             const bMatch = (b.hand === inputHand || b.hand === 'any');
-            
-            // If one matches and the other doesn't, the matching one comes first
             if (aMatch && !bMatch) return -1;
             if (!aMatch && bMatch) return 1;
-
-            // Otherwise, sort by time difference
             const diffA = Math.abs(a.time - tapTime);
             const diffB = Math.abs(b.time - tapTime);
             return diffA - diffB;
         });
-
         closestHit = candidates[0];
     }
 
@@ -445,9 +462,7 @@ const RhythmEngine: React.FC = () => {
         rawDiff = (tapTime - closestHit.time) * 1000;
         const diffMs = Math.abs(rawDiff);
 
-        // Hand Check!
         if (closestHit.hand !== 'any' && closestHit.hand !== inputHand) {
-            // Wrong hand!
             closestHit.processed = true;
             score = 0;
             label = "Wrong Drum!";
@@ -470,11 +485,9 @@ const RhythmEngine: React.FC = () => {
             }
         }
     } else {
-        // Stray tap (no note nearby)
         score = 0; label = "Miss"; color = "text-red-400/50";
     }
 
-    // Record stats
     if (closestHit) {
       hitHistory.current.push({
         offset: rawDiff,
@@ -505,7 +518,7 @@ const RhythmEngine: React.FC = () => {
     });
 
     setLastHit({ score, timestamp: performance.now(), label, color });
-  }, [gameState, gameConfig, play808Tom]);
+  }, [gameState, gameConfig, playClave]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -517,9 +530,6 @@ const RhythmEngine: React.FC = () => {
       const rightKeys = ['KeyJ', 'KeyK', 'KeyL', 'KeyM', 'Comma', 'Period', 'KeyN', 'KeyP'];
 
       if (e.code === 'Space') { 
-          // Space is "any" or defaults to right for simplicity in menu, but acts as 'any' in game?
-          // Let's make space act as "Right" for single drum, or maybe restrict space usage in 2-drum.
-          // For UX, space is usually dominant hand. 
           e.preventDefault(); 
           handleTap('right'); 
       } 
@@ -534,7 +544,6 @@ const RhythmEngine: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleTap, togglePause, gameState, quitGame, restartGame]);
 
-  // Helper to calculate percentages for chart
   const getTimingStats = (history: HitEvent[]) => {
       const early = history.filter(h => h.offset < -15).length;
       const late = history.filter(h => h.offset > 15).length;
@@ -599,7 +608,7 @@ const RhythmEngine: React.FC = () => {
              </div>
           </div>
 
-          <div className="absolute top-8 left-8 right-8 flex justify-between items-start z-10 pointer-events-none">
+          <div className="absolute top-8 left-8 right-8 flex justify-between items-start z-[60] pointer-events-none">
              <div className="flex flex-col items-start">
                  <div className="text-5xl font-serif text-white/90">
                      {Math.floor(stats.totalScore).toLocaleString()}
@@ -617,11 +626,24 @@ const RhythmEngine: React.FC = () => {
                  )}
              </div>
              
-             <div className="flex flex-col items-end">
-                 <div className={`text-5xl font-serif ${stats.averageAccuracy > 95 ? 'text-white' : 'text-slate-300'}`}>
-                     {stats.averageAccuracy.toFixed(1)}<span className="text-2xl opacity-50">%</span>
+             <div className="flex items-start gap-8">
+                 <div className="flex flex-col items-end">
+                     <div className={`text-5xl font-serif ${stats.averageAccuracy > 95 ? 'text-white' : 'text-slate-300'}`}>
+                         {stats.averageAccuracy.toFixed(1)}<span className="text-2xl opacity-50">%</span>
+                     </div>
+                     <div className="text-xs font-sans text-slate-500 tracking-[0.2em] mt-2 uppercase">Accuracy</div>
                  </div>
-                 <div className="text-xs font-sans text-slate-500 tracking-[0.2em] mt-2 uppercase">Accuracy</div>
+                 
+                 {/* Visual Pause Button */}
+                 <button 
+                     onClick={(e) => { e.stopPropagation(); togglePause(); }}
+                     className="pointer-events-auto bg-white/5 hover:bg-white/10 p-4 rounded-full border border-white/10 transition-colors backdrop-blur-sm group"
+                 >
+                    <div className="flex gap-1">
+                        <div className="w-1 h-4 bg-slate-300 group-hover:bg-white transition-colors rounded-full"></div>
+                        <div className="w-1 h-4 bg-slate-300 group-hover:bg-white transition-colors rounded-full"></div>
+                    </div>
+                 </button>
              </div>
           </div>
 
@@ -643,17 +665,17 @@ const RhythmEngine: React.FC = () => {
           )}
 
           {gameState === GameState.PAUSED && (
-            <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-lg flex flex-col items-center justify-center animate-in fade-in duration-500 pointer-events-auto" onPointerDown={(e) => e.stopPropagation()}>
-                <h2 className="text-5xl font-serif italic text-white mb-12">Paused</h2>
-                <div className="flex flex-col space-y-6 w-64 items-center">
-                    <button onClick={(e) => { e.stopPropagation(); togglePause(); }} className="text-sm font-sans tracking-[0.3em] text-white hover:scale-105 transition-transform uppercase">
+            <div className="absolute inset-0 z-[70] bg-black/80 backdrop-blur-lg flex flex-col items-center justify-center animate-in fade-in duration-500 pointer-events-auto" onPointerDown={(e) => e.stopPropagation()}>
+                <h2 className="text-6xl font-serif italic text-white mb-12 drop-shadow-2xl">Paused</h2>
+                <div className="flex flex-col space-y-8 w-72 items-center">
+                    <button onClick={(e) => { e.stopPropagation(); togglePause(); }} className="w-full py-4 text-sm font-sans tracking-[0.3em] bg-white text-black hover:scale-105 transition-transform uppercase rounded shadow-[0_0_20px_rgba(255,255,255,0.2)]">
                         Resume
                     </button>
-                    <button onClick={(e) => { e.stopPropagation(); restartGame(); }} className="text-xs font-sans tracking-[0.3em] text-slate-300 hover:text-white hover:scale-105 transition-all uppercase">
+                    <button onClick={(e) => { e.stopPropagation(); restartGame(); }} className="w-full py-4 text-xs font-sans tracking-[0.3em] text-white border border-white/20 hover:bg-white/10 hover:border-white/50 transition-all uppercase rounded">
                         Restart Level
                     </button>
-                    <button onClick={(e) => { e.stopPropagation(); quitGame(); }} className="text-xs font-sans tracking-[0.3em] text-slate-500 hover:text-white transition-colors uppercase pt-4 border-t border-white/10 w-full text-center">
-                        Exit
+                    <button onClick={(e) => { e.stopPropagation(); quitGame(); }} className="w-full py-4 text-xs font-sans tracking-[0.3em] text-slate-500 hover:text-red-400 transition-colors uppercase pt-4 w-full text-center">
+                        Exit to Menu
                     </button>
                 </div>
             </div>
@@ -734,29 +756,26 @@ const RhythmEngine: React.FC = () => {
                         {(() => {
                             const windows = SCORING_WINDOWS[gameConfig.difficulty];
                             const maxDev = windows[3];
-                            // Scale so maxDev is near the edge (say +/- 90px from center, leaving 10px margin)
                             const yScale = 90 / maxDev;
 
                             return (
                                 <>
-                                    {/* Zones Backgrounds */}
                                     <rect x="0" y={100 - windows[2] * yScale} width={GAME_DURATION} height={windows[2] * yScale * 2} fill="rgba(255,255,255,0.03)" />
                                     <rect x="0" y={100 - windows[1] * yScale} width={GAME_DURATION} height={windows[1] * yScale * 2} fill="rgba(255,255,255,0.05)" />
                                     <rect x="0" y={100 - windows[0] * yScale} width={GAME_DURATION} height={windows[0] * yScale * 2} fill="rgba(255,255,255,0.08)" />
 
                                     <line x1="0" y1="100" x2={GAME_DURATION} y2="100" stroke="rgba(255,255,255,0.3)" strokeWidth="1" strokeDasharray="4 4" />
                                     
-                                    {/* Data Points */}
                                     {stats.history.map((hit, i) => {
                                         let cy = 100 - (hit.offset * yScale); 
                                         cy = Math.max(5, Math.min(195, cy));
                                         
                                         const absOff = Math.abs(hit.offset);
                                         let color = '#ffffff'; 
-                                        if (hit.isMiss || absOff > windows[3]) color = '#ef4444'; // Miss (Red)
-                                        else if (absOff > windows[2]) color = '#facc15'; // Good (Yellow)
-                                        else if (absOff > windows[1]) color = '#a7f3d0'; // Great (Green-ish)
-                                        else if (absOff > windows[0]) color = '#22d3ee'; // Perfect (Cyan)
+                                        if (hit.isMiss || absOff > windows[3]) color = '#ef4444';
+                                        else if (absOff > windows[2]) color = '#facc15';
+                                        else if (absOff > windows[1]) color = '#a7f3d0';
+                                        else if (absOff > windows[0]) color = '#22d3ee';
                                         
                                         const opacity = hit.isMiss ? 0.4 : 0.9;
                                         

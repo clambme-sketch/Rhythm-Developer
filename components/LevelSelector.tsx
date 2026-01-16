@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LEVELS } from '../data/levels';
-import { Level, Difficulty, GameConfig, HighScores } from '../types';
+import { Level, Difficulty, GameConfig, HighScores, Hand } from '../types';
 
 interface LevelSelectorProps {
   onSelect: (config: GameConfig) => void;
@@ -14,6 +14,10 @@ const LevelSelector: React.FC<LevelSelectorProps> = ({ onSelect }) => {
   const [highScores, setHighScores] = useState<HighScores>({});
   const [isExiting, setIsExiting] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string>('Fundamentals');
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  
+  const previewCtx = useRef<AudioContext | null>(null);
+  const previewTimeout = useRef<number | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem('rhythmPulseScores');
@@ -24,15 +28,98 @@ const LevelSelector: React.FC<LevelSelectorProps> = ({ onSelect }) => {
         console.error("Failed to load scores", e);
       }
     }
+    
+    // Cleanup preview on unmount
+    return () => stopPreview();
   }, []);
 
+  const stopPreview = () => {
+    if (previewCtx.current) {
+        previewCtx.current.close();
+        previewCtx.current = null;
+    }
+    if (previewTimeout.current) {
+        window.clearTimeout(previewTimeout.current);
+        previewTimeout.current = null;
+    }
+    setIsPreviewing(false);
+  };
+
+  const playPreview = async () => {
+      if (isPreviewing) {
+          stopPreview();
+          return;
+      }
+      if (!selectedLevel) return;
+
+      setIsPreviewing(true);
+      previewCtx.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ctx = previewCtx.current;
+      if (!ctx) return;
+      
+      const beatDuration = 60 / bpm;
+      const loopDuration = beatDuration * selectedLevel.loopBeats;
+      const now = ctx.currentTime + 0.1;
+
+      // Play looping twice
+      for(let loop = 0; loop < 2; loop++) {
+          const loopOffset = loop * loopDuration;
+
+          // Notes
+          selectedLevel.pattern.forEach(note => {
+              const time = now + loopOffset + (note.beat * beatDuration);
+              
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              
+              // Use Clave Tuning: Perfect Fourth
+              const freq = (note.hand === 'left') ? 1800 : 2400;
+              
+              osc.type = 'sine';
+              osc.frequency.setValueAtTime(freq, time);
+              
+              gain.gain.setValueAtTime(0, time);
+              gain.gain.linearRampToValueAtTime(0.6, time + 0.005);
+              gain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
+
+              osc.connect(gain);
+              gain.connect(ctx.destination);
+              
+              osc.start(time);
+              osc.stop(time + 0.15);
+          });
+
+          // Metronome (Downbeats)
+          for(let i=0; i<selectedLevel.loopBeats; i++) {
+              const time = now + loopOffset + (i * beatDuration);
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.frequency.setValueAtTime(150, time);
+              osc.frequency.exponentialRampToValueAtTime(50, time + 0.1);
+              gain.gain.setValueAtTime(0.2, time); 
+              gain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
+              osc.connect(gain);
+              gain.connect(ctx.destination);
+              osc.start(time);
+              osc.stop(time + 0.15);
+          }
+      }
+      
+      // Auto stop after 2 loops
+      previewTimeout.current = window.setTimeout(() => {
+          stopPreview();
+      }, (loopDuration * 2) * 1000 + 200);
+  };
+
   const openConfig = (level: Level) => {
+    stopPreview();
     setSelectedLevel(level);
     setBpm(level.bpm);
     setDifficulty(Difficulty.MEDIUM);
   };
 
   const handleStart = () => {
+    stopPreview();
     if (selectedLevel) {
       setIsExiting(true);
       setTimeout(() => {
@@ -43,6 +130,13 @@ const LevelSelector: React.FC<LevelSelectorProps> = ({ onSelect }) => {
         });
       }, 700);
     }
+  };
+  
+  const handleClose = () => {
+      if (!isExiting) {
+          stopPreview();
+          setSelectedLevel(null);
+      }
   };
 
   const renderScore = (levelId: string, diff: Difficulty) => {
@@ -80,7 +174,7 @@ const LevelSelector: React.FC<LevelSelectorProps> = ({ onSelect }) => {
       >
           
           <div className="text-center mb-12 space-y-4">
-            <h1 className="text-7xl md:text-9xl font-serif italic text-transparent bg-clip-text bg-gradient-to-br from-white via-slate-200 to-slate-500 tracking-tighter drop-shadow-2xl">
+            <h1 className="text-6xl md:text-8xl font-serif italic text-transparent bg-clip-text bg-gradient-to-br from-white via-slate-200 to-slate-500 tracking-tighter drop-shadow-2xl pb-4">
                 Rhythm
             </h1>
             <h2 className="text-2xl font-sans font-light tracking-[0.4em] text-slate-400 uppercase">
@@ -167,7 +261,7 @@ const LevelSelector: React.FC<LevelSelectorProps> = ({ onSelect }) => {
       {/* Configuration Modal */}
       {selectedLevel && (
         <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${isExiting ? 'animate-out fade-out duration-700' : ''}`}>
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-md transition-all duration-500" onClick={() => !isExiting && setSelectedLevel(null)} />
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-md transition-all duration-500" onClick={handleClose} />
           
           <div className={`relative w-full max-w-lg bg-[#0a0a0a] border border-white/10 shadow-[0_0_100px_rgba(0,0,0,0.5)] p-12 flex flex-col space-y-10 ${isExiting ? '' : 'animate-in fade-in slide-in-from-bottom-12 duration-500'}`}>
              
@@ -226,10 +320,21 @@ const LevelSelector: React.FC<LevelSelectorProps> = ({ onSelect }) => {
              {/* Actions */}
              <div className="flex space-x-0 pt-8 border-t border-white/5">
                <button 
-                  onClick={() => !isExiting && setSelectedLevel(null)}
+                  onClick={handleClose}
                   className="flex-1 py-4 text-slate-500 hover:text-white transition-colors font-sans text-xs tracking-[0.2em] uppercase"
                >
                  Back
+               </button>
+               <div className="w-px bg-white/10 mx-4"></div>
+               <button 
+                  onClick={playPreview}
+                  className={`flex-1 py-4 text-slate-300 hover:text-white transition-colors font-sans text-xs tracking-[0.2em] uppercase flex items-center justify-center gap-2 ${isPreviewing ? 'text-white' : ''}`}
+               >
+                 {isPreviewing ? (
+                     <>
+                        <div className="w-2 h-2 bg-rose-500 rounded-full animate-pulse"></div> Stop
+                     </>
+                 ) : "Preview"}
                </button>
                <div className="w-px bg-white/10 mx-4"></div>
                <button 

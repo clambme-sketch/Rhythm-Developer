@@ -19,12 +19,6 @@ const App: React.FC = () => {
 
       <RhythmEngine />
 
-      {/* Footer Branding */}
-      <div className="absolute bottom-8 left-8 z-50 opacity-40 hover:opacity-100 transition-opacity duration-700">
-        <div className="font-serif italic text-sm text-slate-400 tracking-widest">
-          Rhythm Developer <span className="not-italic text-[10px] font-sans ml-2 opacity-50">EST. 2025</span>
-        </div>
-      </div>
     </div>
   );
 };
