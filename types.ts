@@ -68,6 +68,17 @@ export interface GameStats {
   history: HitEvent[];
 }
 
+export interface AnalysisStats {
+  perfects: number;
+  misses: number;
+  averageAccuracy: number;
+  earlyRate: number; 
+  lateRate: number; 
+  offbeatMisses: number;
+  downbeatMisses: number;
+  trend: 'improving' | 'degrading' | 'stable';
+}
+
 export interface HighScoreEntry {
   score: number;
   accuracy: number;
