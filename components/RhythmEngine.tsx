@@ -392,9 +392,9 @@ const RhythmEngine: React.FC = () => {
   };
 
   return (
-    <div className="relative w-full h-screen flex flex-col items-center justify-center overflow-hidden font-sans touch-none">
+    <div className="relative w-full h-screen flex flex-col items-center justify-center overflow-hidden font-sans">
       {gameState === GameState.PLAYING && (
-          <div className="absolute inset-0 z-50 flex pointer-events-auto">
+          <div className="absolute inset-0 z-50 flex pointer-events-auto touch-none">
               <div className="w-1/2 h-full active:bg-cyan-500/10 transition-colors" onPointerDown={() => handleTap('left')}></div>
               <div className="w-1/2 h-full active:bg-rose-500/10 transition-colors" onPointerDown={() => handleTap('right')}></div>
           </div>
