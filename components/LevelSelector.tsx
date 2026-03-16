@@ -168,7 +168,7 @@ const LevelSelector: React.FC<LevelSelectorProps> = ({ onSelect }) => {
   return (
     <>
       <div 
-        className={`z-20 w-full max-w-[90rem] px-8 flex flex-col items-center pb-12 overflow-y-auto max-h-screen py-16
+        className={`z-20 w-full max-w-[90rem] px-8 flex flex-col items-center pb-12 overflow-y-auto max-h-[100dvh] py-16
         ${isExiting ? 'animate-out fade-out zoom-out duration-700 fill-mode-forwards' : 'animate-in fade-in zoom-in duration-700'}
         ${selectedLevel ? 'blur-md brightness-50 pointer-events-none' : ''}`}
       >

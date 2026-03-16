@@ -392,7 +392,7 @@ const RhythmEngine: React.FC = () => {
   };
 
   return (
-    <div className="relative w-full h-screen flex flex-col items-center justify-center overflow-hidden font-sans">
+    <div className="relative w-full h-[100dvh] flex flex-col items-center justify-center overflow-hidden font-sans">
       {gameState === GameState.PLAYING && (
           <div className="absolute inset-0 z-50 flex pointer-events-auto touch-none">
               <div className="w-1/2 h-full active:bg-cyan-500/10 transition-colors" onPointerDown={() => handleTap('left')}></div>
@@ -446,8 +446,9 @@ const RhythmEngine: React.FC = () => {
       )}
 
       {gameState === GameState.RESULTS && gameConfig && (
-        <div className="z-20 w-full max-w-4xl bg-[#0a0a0a]/90 backdrop-blur-xl border border-white/10 p-8 shadow-2xl flex flex-col pointer-events-auto max-h-[90vh] overflow-y-auto">
-          <div className="flex justify-between items-end mb-6 border-b border-white/10 pb-4">
+        <div className="absolute inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-md pointer-events-auto flex flex-col items-center py-12 px-4">
+          <div className="w-full max-w-4xl bg-[#0a0a0a] border border-white/10 p-6 md:p-8 shadow-2xl flex flex-col shrink-0 my-auto">
+            <div className="flex justify-between items-end mb-6 border-b border-white/10 pb-4">
             <div><h2 className="text-4xl font-serif italic text-white mb-2">Results</h2><div className={`text-[10px] font-sans tracking-[0.3em] text-${gameConfig.level.color}-300 uppercase`}>{gameConfig.level.name}</div></div>
             <div className="text-right"><div className="text-3xl font-serif text-white">{stats.averageAccuracy.toFixed(1)}%</div><div className="text-[10px] font-sans text-slate-500 uppercase">Accuracy</div></div>
           </div>
@@ -556,6 +557,7 @@ const RhythmEngine: React.FC = () => {
              <button onClick={quitGame} className="text-[10px] font-sans text-slate-500 hover:text-white uppercase tracking-widest">Back to Menu</button>
              <button onClick={() => startGame(gameConfig)} className={`text-[10px] font-sans text-${gameConfig.level.color}-300 hover:text-white uppercase font-bold tracking-widest`}>Retry Level</button>
           </div>
+        </div>
         </div>
       )}
     </div>
